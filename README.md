@@ -1,2 +1,2 @@
 # aiplatform
-Hi there
+This is AI platform notebooks.
