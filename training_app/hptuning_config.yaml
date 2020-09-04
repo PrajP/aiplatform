@@ -16,8 +16,8 @@
 trainingInput:
   hyperparameters:
     goal: MAXIMIZE
-    maxTrials: 1
-    maxParallelTrials: 1
+    maxTrials: 4
+    maxParallelTrials: 4
     hyperparameterMetricTag: accuracy
     enableTrialEarlyStopping: TRUE
     algorithm: RANDOM_SEARCH
