@@ -16,19 +16,24 @@
 trainingInput:
   hyperparameters:
     goal: MAXIMIZE
-    maxTrials: 3
-    maxParallelTrials: 3
+    maxTrials: 1
+    maxParallelTrials: 1
     hyperparameterMetricTag: accuracy
-    enableTrialEarlyStopping: TRUE 
+    enableTrialEarlyStopping: TRUE
+    algorithm: RANDOM_SEARCH
     params:
-    - parameterName: max_iter
-      type: DISCRETE
-      discreteValues: [
-          200,
-          500
-          ]
-    - parameterName: alpha
-      type: DOUBLE
-      minValue:  0.00001
-      maxValue:  0.001
+    - parameterName: n_estimators
+      type: INTEGER
+      minValue: 5
+      maxValue: 100
+      scaleType: UNIT_LINEAR_SCALE
+    - parameterName: max_depth
+      type: INTEGER
+      minValue: 20
+      maxValue: 200
+      scaleType: UNIT_LINEAR_SCALE
+    - parameterName: min_samples_leaf
+      type: INTEGER
+      minValue: 1
+      maxValue: 200
       scaleType: UNIT_LINEAR_SCALE

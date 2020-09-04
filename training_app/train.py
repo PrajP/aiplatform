@@ -34,6 +34,21 @@ from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import SGDClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.model_selection import train_test_split  ## from analysis
+
+#simple sklearn impute and scale numeric pipeline
+from sklearn.pipeline import Pipeline ## from analysis
+from sklearn.impute import SimpleImputer ## from analysis
+from sklearn.preprocessing import StandardScaler ## from analysis
+import numpy as np ## from analysis
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.utils.class_weight import compute_class_weight
+from sklearn.model_selection import RandomizedSearchCV
+
+
+import functools
+
 
 from sklearn import metrics
 from sklearn.metrics import accuracy_score
@@ -58,126 +73,152 @@ from googleapiclient import errors
 
 
 
-def train_evaluate(job_dir, training_dataset_path, validation_dataset_path, alpha, max_iter, hptune):
+def train_evaluate(job_dir, input_file, training_dataset, validation_dataset, n_estimators, max_depth, min_samples_leaf, hptune):
     
-    #data = pd.read_excel(bkt_excl,sheet_name='data') 
-    df_train = pd.read_excel(training_dataset_path,sheet_name='data')
-    df_validation = pd.read_excel(validation_dataset_path,sheet_name='data')
-    meta_data = pd.read_excel(training_dataset_path,sheet_name='meta data') 
+   
+    obj = input_file
+    print("obj", obj)
+    data = pd.read_excel(obj,sheet_name='data') 
+    print("Opened excel file and assigned to data")
+    meta_data = pd.read_excel(obj,sheet_name='meta data') 
+    print("Just after file opening")
     
-    #df_train = pd.read_csv(training_dataset_path)
-    #df_validation = pd.read_csv(validation_dataset_path)
-
     if not hptune:
         df_train = pd.concat([df_train, df_validation])
 
-    #numeric_feature_indexes = slice(0, 10)
-    #categorical_feature_indexes = slice(10, 12)
-   
-    
+
+    ## Preprocess    
     #Prepare data for analysis
     #Split out numeric from categorical varibles
 
-    numeric_vars = ((df_train.dtypes == 'float64') | (df_train.dtypes == 'int64')) & (meta_data['variable type'] == 'independent').values
-    numeric_x_data = df_train[df_train.columns[numeric_vars]]
+    ##var_type_filter = [x in ['physiological','biochemical','process'] for x in meta_data['variable type']]
+    var_type_filter = [x in ['independent'] for x in meta_data['variable type']]
+    var_dtype_filter = (data.dtypes == 'float64') | (data.dtypes == 'int64')
 
-    numeric_vars_val = ((df_validation.dtypes == 'float64') | (df_validation.dtypes == 'int64')) & (meta_data['variable type'] == 'independent').values
-    numeric_x_data_val = df_validation[df_validation.columns[numeric_vars_val]]
+    numeric_vars = (var_type_filter & var_dtype_filter).values
+    numeric_x_data = data[data.columns[numeric_vars]]
 
+    #things to try to predict
+    y_data = data[data.columns[(meta_data['target'] == 1).values]]
+
+    #meta data about variables
+    meta_data = meta_data.query('name in {}'.format(list(data.columns[numeric_vars].values))).set_index('name')
+ 
+    #Variables which will be used to build the model
+    ####data.columns[numeric_vars].values
+        
+
+
+    model_target = 'Run_Performance' ## Select target for classification
     
-    cat_vars = ((df_train.dtypes == 'string') | (df_train.dtypes == 'object')) & (meta_data['variable type'] == 'independent').values
-    cat_x_data = df_train[df_train.columns[cat_vars]]
+    print("before splitting data")
+    #maintain class balance
+    X_train, X_test, y_train, y_test = train_test_split(numeric_x_data, y_data, test_size=0.25, stratify = y_data[model_target], random_state=42)
 
-    #Things to try to predict
-
-    y_data = df_train[df_train.columns[(meta_data['target'] == 1).values]]
-    y_data_val = df_validation[df_validation.columns[(meta_data['target'] == 1).values]]
+    #split train set to create a pseudo test or validation dataset
+    X_train, X_validate, y_train, y_validate = train_test_split(X_train, y_train, test_size=0.33, stratify= y_train[model_target], random_state=42)
     
-   
-    # meta data about variables
+    
+    print('The training, validation and test data contain {}, {} and {} rows respectively'.format(len(X_train),len(X_validate),len(X_test)))
 
-    meta_data = meta_data.set_index('name')    
+    #save_list_train = ['X_train','y_train','meta_data']
+    #save_list_validate = ['X_validate','y_validate','meta_data']
+    #save_list_test = ['X_test','y_test','meta_data']
 
-    #Impute missing with median #handle missing values with median. SKlearn provides imputer
+    #for x in save_list_train:
+    #    print("training_dataset", training_dataset)
+    #    obj = pd.DataFrame(globals()[x])
+    #    #cmd = "obj.to_csv('../data/{}.csv')".format(x)
+    #    #cmd = "obj.to_csv('/home/jupyter/aiplatform/data/{}.csv')".format(x)
+    #    cmd = "obj.to_excel('{}/{}.xlsx')".format(training_dataset, x)
+    #    eval(cmd)
+    
+    #for x in save_list_validate:
+    #    print("validation_dataset", validation_dataset)
+    #    obj = pd.DataFrame(globals()[x])
+    #    #cmd = "obj.to_csv('../data/{}.csv')".format(x)
+    #    #cmd = "obj.to_csv('/home/jupyter/aiplatform/data/{}.csv')".format(x)
+    #    cmd = "obj.to_excel('{}/{}.xlsx')".format(validation_dataset, x)
+    #    eval(cmd)    
+    
+    #for x in save_list_test:
+    #    print("testing_dataset", testing_dataset)
+    #    obj = pd.DataFrame(globals()[x])
+    #    #cmd = "obj.to_csv('../data/{}.csv')".format(x)
+    #    #cmd = "obj.to_csv('/home/jupyter/aiplatform/data/{}.csv')".format(x)
+    #    cmd = "obj.to_excel('{}/{}.xlsx')".format(testing_dataset, x)
+    #    eval(cmd)    
+    
+
+    ## Train, optimize and validate predictive model
+    ### Train
+
+
+
+    classifier = RandomForestClassifier(
+                n_estimators=n_estimators,
+                max_depth=max_depth,
+                min_samples_leaf=min_samples_leaf
+
+     )
+
+    #numeric_transformer = Pipeline([
+    #  ('imputer', SimpleImputer(strategy='median')),
+    #  ('scaler', StandardScaler()),
+    # ])
+
+
+    #transform_list = []
+      # If there exist numerical columns
+    #transform_list.extend([
+    #    ('numeric', numeric_transformer)
+    #])
+
+    #preprocessor = ColumnTransformer(transform_list)
     imputer = SimpleImputer(missing_values=np.nan, strategy='median')
-
     #auto scale
     scaler = StandardScaler()
 
-    #pipe = Pipeline([('imputer',imputer),('scaler', scaler)])
-    
-    #preprocessor = ColumnTransformer(
-    #transformers=[
-    #    ('num', StandardScaler(), numeric_x_data),
-    #    ('cat', OneHotEncoder(), cat_x_data) 
-    #])
-
-    pipe = Pipeline([
-        ('imputer',imputer), ('scaler', scaler) 
-    ])
-
-    
-    scaled_numeric_x_data = pipe.fit_transform(numeric_x_data)
-    scaled_numeric_x_data_val = pipe.fit_transform(numeric_x_data_val)
-    
-    pca = PCA(n_components=3)
-    pca_result = pca.fit_transform(scaled_numeric_x_data)
-    pca_result_val = pca.fit_transform(scaled_numeric_x_data_val)
-
-    
-    #pipe = Pipeline([
-    #    ('preprocessor', preprocessor),('imputer',imputer),
-    #    ('sgdregressor', SGDRegressor(loss='squared_loss',tol=1e-3))
-    #])
-
-    
-    pipeline = Pipeline([
-        ('sgdregressor', SGDRegressor(loss='squared_loss',tol=1e-3))
+    estimator = Pipeline([
+      ('imputer', imputer),
+      ('scaler', scaler),
+      ('classifier', classifier),
     ])
     
     
-    ##########
-    #preprocessor = ColumnTransformer(
-    #transformers=[
-    #    ('num', StandardScaler(), numeric_feature_indexes),
-    #    ('cat', OneHotEncoder(), categorical_feature_indexes) 
+    
+    #estimator = Pipeline([
+      #('preprocessor', preprocessor),
+    
+     # ('classifier', classifier),
     #])
 
-    #pipeline = Pipeline([
-    #    ('preprocessor', preprocessor),
-    #    ('classifier', SGDClassifier(loss='log',tol=1e-3))
-    #])
+    #prepare data for modeling
+    #use the pipeline created above
+    #_X_train = pipe.fit_transform(X_train)
+    #_y_train = y_train[model_target]    ## selected target label for prediction
+    #_X_test = pipe.fit_transform(X_validate)
+    #_y_test = y_validate[model_target]
 
-    #num_features_type_map = {feature: 'float64' for feature in df_train.columns[numeric_feature_indexes]}
-    #df_train = df_train.astype(num_features_type_map)
-    #df_validation = df_validation.astype(num_features_type_map) 
-     
+    #_X_train = pipe.fit_transform(X_train)
+    _X_train = X_train    
+    _y_train = y_train[model_target]    ## selected target label for prediction
+    _X_test = X_validate
+    _y_test = y_validate[model_target]
     
-    print('Starting training: alpha={}, max_iter={}'.format(alpha, max_iter))
-    df_train = get_results(pca_result,'pca-', add = y_data)
-    df1_train = df_train
-    df2_train = df1_train.dropna()
-    
-    df_validation = get_results(pca_result_val,'pca-', add = y_data_val)
-    df1_validation = df_validation
-    df2_validation = df1_validation.dropna()
+
+    print('Starting training: alpha={}, max_iter={}'.format(n_estimators, max_depth, min_samples_leaf))
+
+    #estimator.set_params(classifier__alpha=alpha, classifier__max_iter=max_iter) 
+    estimator.set_params(classifier__n_estimators=n_estimators, classifier__max_depth=max_depth, classifier__min_samples_leaf=min_samples_leaf) 
+    #pipeline.fit(X_train, y_train)
+    estimator.fit(_X_train, _y_train)
 
     
-    #X_train = df_train.drop("Run_Execution","Run_Performance","Product_Produced__g","Titer_End__g_over_kg", axis=1)
-    #y_train = df_train["Product_Produced__g"]
-    #X_train = df2_train.drop("Run_Execution","Run_Performance","Product_Produced__g","Titer_End__g_over_kg", axis=1)
-    X_train = df2_train.drop(columns=["Run_Execution","Run_Performance","Product_Produced__g","Titer_End__g_over_kg"])
-    y_train = df2_train["Product_Produced__g"]
-
-
-    #pipeline.set_params(classifier__alpha=alpha, classifier__max_iter=max_iter)
-    pipeline.set_params(sgdregressor__alpha=alpha, sgdregressor__max_iter=max_iter)   
-    pipeline.fit(X_train, y_train)
-
     if hptune:
-        X_validation = df2_validation.drop(columns=["Run_Execution","Run_Performance","Product_Produced__g","Titer_End__g_over_kg"])
-        y_validation = df2_validation["Product_Produced__g"]
-        accuracy = pipeline.score(X_validation, y_validation)
+        #X_validation = df2_validation.drop(columns=["Run_Execution","Run_Performance","Product_Produced__g","Titer_End__g_over_kg"])
+        #y_validation = df2_validation["Product_Produced__g"]
+        accuracy = estimator.score(_X_test, _y_test)
         print('Model accuracy: {}'.format(accuracy))
         # Log it with hypertune
         hpt = hypertune.HyperTune()
@@ -190,25 +231,12 @@ def train_evaluate(job_dir, training_dataset_path, validation_dataset_path, alph
     if not hptune:
         model_filename = 'model.pkl'
         with open(model_filename, 'wb') as model_file:
-            pickle.dump(pipeline, model_file)
+            pickle.dump(estimator, model_file)
         gcs_model_path = "{}/{}".format(job_dir, model_filename)
         subprocess.check_call(['gsutil', 'cp', model_filename, gcs_model_path], stderr=sys.stdout)
         print("Saved model in: {}".format(gcs_model_path)) 
 
-        
-
-def get_results(res,prefix='',ncol=3, add=None):
-    #collect results    
-    out= pd.DataFrame()
-    for i in range(ncol):
-        key = prefix + str(i+1)
-        value = res[:,i]
-        out.loc[:,key] = value
     
-    if add is not None:
-        out = pd.concat([out,add],axis=1)
-    
-    return out
 
         
 if __name__ == "__main__":
